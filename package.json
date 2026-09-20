@@ -1,6 +1,6 @@
 {
   "name": "dsh-pdf-sign",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "PDF electronic signing for DeepSeek Harness: generate handwritten-style signature images, stamp them onto PDF pages, and apply PKCS#7 digital signatures with your own certificate. · DSH PDF 电子签名插件：生成签名图、PDF 盖章（可视化签名）、自签/自备证书的数字签名。",
   "type": "module",
   "main": "./lib/index.js",
@@ -36,6 +36,7 @@
     "@signpdf/placeholder-pdf-lib": "^3.3.0",
     "@signpdf/signer-p12": "^3.3.0",
     "@signpdf/signpdf": "^3.3.0",
+    "jpeg-js": "^0.4.4",
     "pdf-lib": "^1.17.1"
   },
   "files": [

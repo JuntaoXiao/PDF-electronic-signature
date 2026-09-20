@@ -114,6 +114,24 @@ export interface StampOptions {
   margin?: number
   fontSize?: number
   color?: string | number[]
+  /** Key a flat background out to transparency: 'none' | 'white' | 'auto' | '#rrggbb'. */
+  dropBackground?: string
+  /** Per-channel tolerance for treating a pixel as background (default 28). */
+  dropTolerance?: number
+  /** Crop transparent margins so the ink defines the placement box (default true). */
+  trimImage?: boolean
+}
+
+/** What background keying and trimming did to the stamped image. */
+export interface ImagePreparationReport {
+  sourceWidth: number
+  sourceHeight: number
+  backgroundRemoved: boolean
+  backgroundColor: number[] | null
+  backgroundCoverage: number | null
+  transparentPixels: number
+  trimmed: boolean
+  trimBox: { x: number; y: number; width: number; height: number } | null
 }
 
 /** Place a signature image and/or typed block onto PDF pages (visual signature). */
@@ -126,6 +144,7 @@ export declare function stampSignature(options: StampOptions): Promise<{
   stampedText: boolean
   textFontEmbedded: boolean
   textFontPath: string | null
+  image?: ImagePreparationReport
   note: string
 }>
 
@@ -208,3 +227,61 @@ export declare function inspectPdfSignatures(pdfPath: string): Promise<{
   hasSignature: boolean
   note: string
 }>
+
+// ---------------------------------------------------------------- image-prep
+
+/** Decode an 8-bit non-interlaced PNG to straight RGBA. */
+export declare function decodePng(bytes: Buffer | Uint8Array): { width: number; height: number; rgba: Buffer }
+
+/** Encode straight RGBA as an 8-bit PNG. */
+export declare function encodeRgbaPng(width: number, height: number, rgba: Buffer | Uint8Array): Buffer
+
+/** Decode a JPEG to straight RGBA (requires the optional jpeg-js dependency). */
+export declare function decodeJpeg(bytes: Buffer | Uint8Array): Promise<{ width: number; height: number; rgba: Buffer }>
+
+/** Find the dominant border colour, used as the background when keying. */
+export declare function detectBackground(
+  rgba: Buffer | Uint8Array,
+  width: number,
+  height: number,
+  tolerance?: number
+): { color: number[]; uniformity: number; dominantShare: number }
+
+/** Parse '#rrggbb' or 'r,g,b' (0-255 or 0-1) into a byte triple. */
+export declare function parseColor(input: string): number[]
+
+/** Key a flat light background out to transparency, un-compositing so colour survives. */
+export declare function keyOutBackground(
+  rgba: Buffer | Uint8Array,
+  width: number,
+  height: number,
+  background: number[],
+  tolerance?: number
+): number
+
+/** Crop to the tight bounds of visible pixels. */
+export declare function trimTransparent(
+  rgba: Buffer | Uint8Array,
+  width: number,
+  height: number,
+  threshold?: number
+): { rgba: Buffer; width: number; height: number; box: { x: number; y: number; width: number; height: number }; empty: boolean }
+
+/** Fraction of pixels that are fully opaque and very light (an unkeyed background). */
+export declare function opaqueLightFraction(
+  rgba: Buffer | Uint8Array,
+  width: number,
+  height: number,
+  threshold?: number
+): number
+
+/**
+ * Prepare a source image for stamping: decode, optionally key out a background,
+ * then optionally trim to the ink. `background` accepts 'none', 'white', 'auto'
+ * or an explicit colour.
+ */
+export declare function prepareImageForStamping(
+  bytes: Buffer | Uint8Array,
+  kind: 'png' | 'jpg',
+  options?: { background?: string; tolerance?: number; trim?: boolean }
+): Promise<{ png: Buffer; report: ImagePreparationReport & { alreadyHasAlpha: boolean; opaqueLightFraction: number; note?: string } }>

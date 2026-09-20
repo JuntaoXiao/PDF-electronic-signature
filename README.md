@@ -92,8 +92,30 @@ Best available fonts are auto-detected: 楷体/标楷体/华文行楷 on Windows
 | `margin` | number | Edge margin in points (default `48`) |
 | `font_size` | number | Text block size (default `10`) |
 | `color` | string | `#rrggbb` or `r,g,b` |
+| `drop_background` | string | Key a flat background out to transparency: `none` (default), `white`, `auto`, or `#rrggbb` |
+| `drop_tolerance` | number | Per-channel tolerance for "this pixel is background" (default `28`) |
+| `trim_image` | boolean | Crop transparent margins so the ink defines the box (default `true`) |
 
 Non-Latin text (Chinese, Japanese, Korean, …) is drawn with a **subset-embedded system TrueType font**, because pdf-lib's standard fonts are WinAnsi-only and cannot encode those characters at all.
+
+##### Background transparency — read this before stacking two images
+
+Signature and seal images are normally exported as **opaque** images on a solid background. An opaque background is a filled rectangle: it hides whatever it is drawn over. So a seal placed on top of a signature **erases the signature**, and a stamp over body text whitens that text. If you feed such an image without `drop_background`, the tool says so in its `note` rather than failing silently.
+
+```
+pdf_sign_stamp(pdf_path="contract.pdf", image_path="signature.png",
+               drop_background="white")          # opaque white export
+pdf_sign_stamp(pdf_path="contract.pdf", image_path="scan.jpg",
+               drop_background="auto")           # samples the border
+```
+
+- `white` — for the usual white-background export.
+- `auto` — samples the image border and keys out the **dominant** border colour. Use when the background is off-white or you don't know it. (It takes the most frequent border colour, not the mean, so ink that runs off the edge does not drag the estimate toward grey.)
+- `#rrggbb` — an explicit colour.
+
+Colour fidelity is preserved: the toolkit **un-composites** each pixel (`I = (C − B·(1−a)) / a`) instead of just fading it, so the result over the page reproduces the original pixel rather than looking washed out. Only light backgrounds can be keyed this way (darkest channel must be ≥ 32); a dark background is rejected with an explanatory error. PNG and JPEG sources both work.
+
+`trim_image` then crops the transparent margins, so the placement box follows the actual ink instead of the source canvas — important because a padded canvas otherwise makes the stamp look far smaller and more offset than intended.
 
 #### `pdf_sign_digital`
 
@@ -188,11 +210,26 @@ pdf_sign_digital(pdf_path="D:/contract.pdf",
                  passphrase="你的口令", reason="合同审批")
 ```
 
-### 三个实现要点
+### 五个实现要点
 
 1. **确定性签名**：每个字以独立的旋转+抖动节点渲染，抖动由**文本内容做种子**——同一个名字永远生成一模一样的签名，重复签署不会出现两种笔迹。
 2. **中文文字盖章需要嵌入字体**：pdf-lib 的标准字体是 WinAnsi 编码，**无法编码任何中文**。插件会自动寻找系统中可嵌入的 TrueType 中文字体（楷体／黑体／仿宋／等线）并做子集嵌入。
 3. **数字签名的占位符必须禁用对象流保存**（`useObjectStreams: false`），这是增量更新签名方案的硬性要求，不是代码风格选择。
+4. **白底必须转透明，否则叠放会互相遮盖**（`drop_background`）。签名与印章图通常是**不透明**的实底图，而不透明背景就是一个实心矩形——**印章盖在签名上会把签名整个擦掉**，盖在正文上会把正文涂白。所以：
+
+   ```
+   pdf_sign_stamp(pdf_path="合同.pdf", image_path="签名.png",
+                  drop_background="white")     # 常见白底导出图
+   pdf_sign_stamp(pdf_path="合同.pdf", image_path="扫描件.jpg",
+                  drop_background="auto")      # 自动采样边框色
+   ```
+
+   - `white`：常规白底导出图；`auto`：采样边框并去掉**占主导**的边框色；也可直接给 `#rrggbb`。
+   - **保留颜色保真**：不是简单地把白变透明（那会让墨迹发灰），而是对每个像素做**反合成**（`I = (C − B·(1−a)) / a`），使结果叠到页面上后与原图像素**完全一致**。
+   - 取的是边框**众数**而非均值——墨迹触到画布边缘时，均值会被拉灰（实测会把 `250,248,245` 误算成 `238,236,233`），众数不受影响。
+   - 仅支持**浅色**背景（最暗通道 ≥ 32）；深色背景会明确报错，不静默出错。PNG 与 JPEG 均可。
+   - 未指定 `drop_background` 而图片又是「全不透明且 ≥90% 近白」时，工具会在 `note` 里**主动提示**该开这个参数，而不是让你事后才发现白块盖住了东西。
+5. **`trim_image`（默认开）裁掉透明留白**：让放置框跟着**真实墨迹**走，而不是源画布。否则带大量留白的画布会让印章看起来远小于预期、位置也偏。
 
 ### 安全立场
 

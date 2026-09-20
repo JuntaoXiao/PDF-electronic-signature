@@ -9,7 +9,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const { apply } = await import('../lib/index.js')
-const { PDFDocument } = await import('pdf-lib')
+const { PDFDocument, PDFName } = await import('pdf-lib')
+const { encodeRgbaPng } = await import('../lib/image-prep.js')
 
 /** Register the plugin against a capture-only tool registry. */
 function loadPlugin(config = {}) {
@@ -315,4 +316,159 @@ test('defaultOutputDir config redirects generated output', async () => {
   const pdf = await makePdf(join(dir, 'cfg.pdf'))
   const result = await call(tools, 'pdf_sign_stamp', { pdf_path: pdf, text: 'Namer' })
   assert.ok(result.path.startsWith(outDir), `output landed in the configured dir: ${result.path}`)
+})
+
+// ---------------------------------------------------------------- background keying
+
+/**
+ * Build an OPAQUE PNG: a solid light background with an inset dark band.
+ *
+ * The band is inset on all four sides on purpose — it leaves the border ring a
+ * clean sample of the background (so `auto` detection is exercised honestly) and
+ * makes the trim assertion meaningful on width as well as height.
+ */
+async function makeOpaqueArtwork(path, { width = 80, height = 50, bg = [255, 255, 255] } = {}) {
+  const rgba = Buffer.alloc(width * height * 4)
+  const x0 = Math.floor(width * 0.2)
+  const x1 = Math.floor(width * 0.8)
+  const y0 = Math.floor(height * 0.45)
+  const y1 = Math.floor(height * 0.55)
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4
+      const onBand = x >= x0 && x < x1 && y >= y0 && y < y1
+      const c = onBand ? [20, 20, 20] : bg
+      rgba[i] = c[0]; rgba[i + 1] = c[1]; rgba[i + 2] = c[2]; rgba[i + 3] = 255
+    }
+  }
+  writeFileSync(path, encodeRgbaPng(width, height, rgba))
+  return path
+}
+
+/** Count image XObjects on a page that carry an /SMask (i.e. real transparency). */
+async function countSmasks(pdfPath) {
+  const doc = await PDFDocument.load(readFileSync(pdfPath), { ignoreEncryption: true, updateMetadata: false })
+  let withSmasks = 0
+  for (const [, obj] of doc.context.enumerateIndirectObjects()) {
+    const d = obj?.dict
+    if (d?.get?.(PDFName.of('Subtype'))?.toString() !== '/Image') continue
+    if (d.get(PDFName.of('SMask')) !== undefined) withSmasks++
+  }
+  return withSmasks
+}
+
+test('an opaque white-background image warns that it will cover what is beneath it', async () => {
+  const tools = loadPlugin()
+  const pdf = await makePdf(join(dir, 'warn.pdf'))
+  const art = await makeOpaqueArtwork(join(dir, 'opaque-warn.png'))
+  const result = await call(tools, 'pdf_sign_stamp', {
+    pdf_path: pdf,
+    output_path: join(dir, 'warn-signed.pdf'),
+    image_path: art
+  })
+  assert.equal(result.image.background_removed, false)
+  assert.match(result.note, /fully opaque/i, 'warning explains the opaque background')
+  assert.match(result.note, /drop_background/i, 'warning names the parameter to fix it')
+  assert.equal(await countSmasks(result.path), 0, 'nothing was keyed, so no transparency')
+})
+
+test('drop_background "white" keys the background out and writes real transparency', async () => {
+  const tools = loadPlugin()
+  const pdf = await makePdf(join(dir, 'key.pdf'))
+  const art = await makeOpaqueArtwork(join(dir, 'opaque-key.png'))
+  const result = await call(tools, 'pdf_sign_stamp', {
+    pdf_path: pdf,
+    output_path: join(dir, 'key-signed.pdf'),
+    image_path: art,
+    drop_background: 'white'
+  })
+  assert.equal(result.image.background_removed, true)
+  assert.deepEqual(result.image.background_color, [255, 255, 255])
+  assert.ok(result.image.transparent_pixels > 0, `transparent pixels: ${result.image.transparent_pixels}`)
+  // The proof that matters: the PDF carries an /SMask, so the stamp cannot white-out the page.
+  assert.equal(await countSmasks(result.path), 1, 'embedded image has an /SMask')
+})
+
+test('drop_background "auto" samples the image border colour', async () => {
+  const tools = loadPlugin()
+  const pdf = await makePdf(join(dir, 'auto.pdf'))
+  const art = await makeOpaqueArtwork(join(dir, 'opaque-auto.png'), { bg: [250, 248, 245] })
+  const result = await call(tools, 'pdf_sign_stamp', {
+    pdf_path: pdf,
+    output_path: join(dir, 'auto-signed.pdf'),
+    image_path: art,
+    drop_background: 'auto'
+  })
+  assert.equal(result.image.background_removed, true)
+  const [r, g, b] = result.image.background_color
+  assert.ok(Math.abs(r - 250) <= 3 && Math.abs(g - 248) <= 3 && Math.abs(b - 245) <= 3,
+    `detected near the real background, got rgb(${r},${g},${b})`)
+  assert.ok(result.image.background_coverage > 0.5, `border coverage ${result.image.background_coverage}`)
+  assert.equal(await countSmasks(result.path), 1)
+})
+
+test('trim_image crops the transparent margins so ink defines the box', async () => {
+  const tools = loadPlugin()
+  const pdf = await makePdf(join(dir, 'trim.pdf'))
+  const art = await makeOpaqueArtwork(join(dir, 'opaque-trim.png'), { width: 200, height: 120 })
+  const kept = await call(tools, 'pdf_sign_stamp', {
+    pdf_path: pdf,
+    output_path: join(dir, 'trim-kept.pdf'),
+    image_path: art,
+    drop_background: 'white',
+    trim_image: false
+  })
+  const cropped = await call(tools, 'pdf_sign_stamp', {
+    pdf_path: pdf,
+    output_path: join(dir, 'trim-cropped.pdf'),
+    image_path: art,
+    drop_background: 'white',
+    trim_image: true
+  })
+  assert.equal(kept.image.trimmed, false)
+  assert.equal(kept.image.source_width, 200)
+  assert.equal(cropped.image.trimmed, true)
+  // Only the stroke row band survives, so height must shrink a lot.
+  assert.ok(cropped.image.source_height < 40, `trimmed height ${cropped.image.source_height} of 120`)
+  assert.ok(cropped.image.source_width < 200, `trimmed width ${cropped.image.source_width} of 200`)
+})
+
+test('drop_background also works on a JPEG source', async () => {
+  // Build a JPEG through jpeg-js so the JPEG path is genuinely exercised.
+  const jpeg = (await import('jpeg-js')).default
+  const width = 60, height = 40
+  const data = Buffer.alloc(width * height * 4)
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4
+      const ink = x > 20 && x < 40 && y > 12 && y < 28
+      const v = ink ? 15 : 255
+      data[i] = v; data[i + 1] = v; data[i + 2] = v; data[i + 3] = 255
+    }
+  }
+  const art = join(dir, 'opaque.jpg')
+  writeFileSync(art, jpeg.encode({ data, width, height }, 92).data)
+
+  const tools = loadPlugin()
+  const pdf = await makePdf(join(dir, 'jpg.pdf'))
+  const result = await call(tools, 'pdf_sign_stamp', {
+    pdf_path: pdf,
+    output_path: join(dir, 'jpg-signed.pdf'),
+    image_path: art,
+    drop_background: 'white'
+  })
+  assert.equal(result.image.background_removed, true)
+  assert.equal(await countSmasks(result.path), 1, 'JPEG source still yields a transparent stamp')
+})
+
+test('drop_background rejects an unparseable colour', async () => {
+  const tools = loadPlugin()
+  const pdf = await makePdf(join(dir, 'badcolor.pdf'))
+  const art = await makeOpaqueArtwork(join(dir, 'opaque-badcolor.png'))
+  await assert.rejects(() => call(tools, 'pdf_sign_stamp', {
+    pdf_path: pdf,
+    output_path: join(dir, 'badcolor-signed.pdf'),
+    image_path: art,
+    drop_background: 'not-a-colour'
+  }), /cannot parse colour/)
 })
