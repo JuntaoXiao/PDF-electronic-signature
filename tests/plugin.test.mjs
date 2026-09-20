@@ -427,10 +427,17 @@ test('trim_image crops the transparent margins so ink defines the box', async ()
   })
   assert.equal(kept.image.trimmed, false)
   assert.equal(kept.image.source_width, 200)
+  assert.equal(kept.image.source_height, 120)
+  // With trimming off, what gets embedded is the source canvas.
+  assert.equal(kept.image.width, 200)
+  assert.equal(kept.image.height, 120)
+
   assert.equal(cropped.image.trimmed, true)
-  // Only the stroke row band survives, so height must shrink a lot.
-  assert.ok(cropped.image.source_height < 40, `trimmed height ${cropped.image.source_height} of 120`)
-  assert.ok(cropped.image.source_width < 200, `trimmed width ${cropped.image.source_width} of 200`)
+  // Source dimensions are reported unchanged; the embedded size is what shrank.
+  assert.equal(cropped.image.source_width, 200, 'source size is reported as-is')
+  assert.equal(cropped.image.source_height, 120, 'source size is reported as-is')
+  assert.ok(cropped.image.height < 40, `embedded height ${cropped.image.height} of 120`)
+  assert.ok(cropped.image.width < 200, `embedded width ${cropped.image.width} of 200`)
 })
 
 test('drop_background also works on a JPEG source', async () => {

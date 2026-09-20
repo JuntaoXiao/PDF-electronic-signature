@@ -124,8 +124,12 @@ export interface StampOptions {
 
 /** What background keying and trimming did to the stamped image. */
 export interface ImagePreparationReport {
+  /** Dimensions as decoded from the source file. */
   sourceWidth: number
   sourceHeight: number
+  /** Dimensions actually embedded (differ from source when trimmed). */
+  width: number
+  height: number
   backgroundRemoved: boolean
   backgroundColor: number[] | null
   backgroundCoverage: number | null
