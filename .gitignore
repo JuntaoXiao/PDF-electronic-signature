@@ -1,0 +1,22 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build / probe scratch
+.probe/
+*.tsbuildinfo
+
+# local test artifacts
+tests/tmp/
+*-signed.pdf
+*-digitally-signed.pdf
+
+# generated certificates and keys — never commit these
+*.p12
+*.pfx
+signing-key.pem
+signing-cert.pem
+
+# OS noise
+Thumbs.db
+.DS_Store

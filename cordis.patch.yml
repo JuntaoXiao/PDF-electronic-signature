@@ -1,0 +1,4 @@
+# dsh-pdf-sign bundle patch: mounts the PDF signing tool suite into a profile.
+- insert:
+    - id: pdf-sign
+      name: 'dsh-pdf-sign'
