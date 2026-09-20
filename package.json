@@ -21,11 +21,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/JuntaoXiao/dsh-pdf-sign.git"
+    "url": "git+https://github.com/JuntaoXiao/PDF-electronic-signature.git"
   },
-  "homepage": "https://github.com/JuntaoXiao/dsh-pdf-sign#readme",
+  "homepage": "https://github.com/JuntaoXiao/PDF-electronic-signature#readme",
   "bugs": {
-    "url": "https://github.com/JuntaoXiao/dsh-pdf-sign/issues"
+    "url": "https://github.com/JuntaoXiao/PDF-electronic-signature/issues"
   },
   "scripts": {
     "test": "node --test tests/"
